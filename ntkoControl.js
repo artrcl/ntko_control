@@ -2,7 +2,8 @@
 
 function NtkoControl() {
     this.ctx = window.pageContext; // 上下文
-    this.browser = ""; //  浏览器
+    this.browser = {name: "", version: "0"}; //  浏览器 ie/chrome/firefox
+    this.isIE = false;
     this.tangerOcx = null; // html object : document.getElementById("TANGER_OCX")
 
     this.fileName = "";
@@ -32,20 +33,6 @@ function NtkoControl() {
         if (thiz.onDocumentOpened) thiz.onDocumentOpened(thiz);
     };
 
-    this._onDocumentClosed = function () {
-        var thiz = window.ntko;
-        try {
-            thiz.tangerOcx.ActiveDocument.AttachedTemplate.Saved = true;
-        } catch (e) {
-        }
-
-        // 重置数值
-        thiz.fileName = "";
-        thiz.isOpenURLReadOnly = false;
-
-        if (thiz.onDocumentClosed) thiz.onDocumentClosed(thiz);
-    };
-
     this._customToolBarCmd = function (btnIdx) {
         var thiz = window.ntko;
         thiz.tangerOcx.toolbars = !thiz.tangerOcx.toolbars;
@@ -55,13 +42,37 @@ function NtkoControl() {
         try {
             var data = html;
             if (typeof data !== "object") data = JSON.parse(data);
-            if (typeof data !== "object") data = {state: -1, msg: "保存文件出错了！"};
+            if (typeof data !== "object") data = {code: -1, msg: "保存文件出错了！"};
         } catch (e) {
-            data = {state: -1, msg: "保存文件出错了！"};
+            data = {code: -1, msg: "保存文件出错了！"};
         }
 
         var thiz = window.ntko;
         if (thiz.onSaveToUrl) thiz.onSaveToUrl(data);
+    };
+
+    this._AddTemplateFromURL = function (type, code, html) {
+        var thiz = window.ntko;
+        var doc = thiz.tangerOcx.ActiveDocument;
+
+        var BookMarkName = "正文";
+        if (!doc.BookMarks.Exists(BookMarkName)) {
+            var sel = doc.Application.Selection;
+            sel.WholeStory();
+            sel.Paste();
+            alert('Word 模板中不存在名称为："' + BookMarkName + '"的书签！');
+            return;
+        }
+
+        doc.BookMarks(BookMarkName).Range.Paste();
+
+        if (thiz.formData) {
+            for (var k in thiz.formData) {
+                if (doc.BookMarks.Exists(k)) thiz.tangerOcx.SetBookmarkValue(k, thiz.formData[k]);
+            }
+        }
+
+        thiz.acceptRevisions(true);
     };
 
     //author: meizz
@@ -81,15 +92,25 @@ function NtkoControl() {
         return fmt;
     };
 
-    this.uaMatch = function () {
+    this.detectBrowser = function () {
         var ua = navigator.userAgent.toLowerCase();
         var match;
-        if (match = ua.match(/(msie\s|trident.*rv:)([\w.]+)/)) return {browser: "ie", version: match[2] || "0"};
-        if (match = ua.match(/(chrome)\/([\w.]+)/)) return {browser: match[1] || "", version: match[2] || "0"};
-        if (match = ua.match(/(firefox)\/([\w.]+)/)) return {browser: match[1] || "", version: match[2] || "0"};
-        if (match = ua.match(/(opera).+version\/([\w.]+)/)) return {browser: match[1] || "", version: match[2] || "0"};
-        if (match = ua.match(/version\/([\w.]+).*(safari)/)) return {browser: match[2] || "", version: match[1] || "0"};
-        return {browser: "", version: "0"};
+
+        match = ua.match(/(msie\s|trident.*rv:)([\w.]+)/);
+        if (match) return {name: "ie", version: match[2] || "0"};
+
+        match = ua.match(/(chrome)\/([\w.]+)/);
+        if (match) return {name: match[1] || "", version: match[2] || "0"};
+
+        match = ua.match(/(firefox)\/([\w.]+)/);
+        if (match) return {name: match[1] || "", version: match[2] || "0"};
+
+        match = ua.match(/(opera).+version\/([\w.]+)/);
+        if (match) return {name: match[1] || "", version: match[2] || "0"};
+
+        match = ua.match(/version\/([\w.]+).*(safari)/);
+        if (match) return {name: match[2] || "", version: match[1] || "0"};
+        return {name: "", version: "0"};
     };
 
     // 显示 ntko 控件
@@ -101,7 +122,7 @@ function NtkoControl() {
         var clsid;
         var codebase;
 
-        if (this.browser === "ie") {
+        if (this.browser.name === "ie") {
             if (window.navigator.platform === "Win32") {
                 clsid = "A64E3073-2016-4baf-A89D-FFE1FAA10EC0";
                 codebase = this.ctx + "/static/ntko/OfficeControl.cab#version=5.0.2.9";
@@ -114,7 +135,7 @@ function NtkoControl() {
             codebase = this.ctx + "/static/ntko/OfficeControl.cab#version=5,0,2,9";
         }
 
-        if (this.browser === "ie") {
+        if (this.browser.name === "ie") {
             document.write('<object id="TANGER_OCX"'
                 + ' classid="clsid:' + clsid + '"' + ' codebase="' + codebase + '"'
                 + ' width="100%" height="100%">'
@@ -136,13 +157,14 @@ function NtkoControl() {
                 + ' <script language="JScript" for="TANGER_OCX" event="OnCustomToolBarCommand(btnIdx)">'
                 + '     window.ntko._customToolBarCmd(btnIdx);'
                 + ' </script>');
-        } else if (this.browser === "chrome") {
+        } else if (this.browser.name === "chrome") {
             document.write('<object id="TANGER_OCX"'
                 + ' clsid="{' + clsid + '}"' + ' type="application/ntko-plug" codebase="' + codebase + '"'
                 + ' width="100%" height="100%"'
                 + ' ForOnDocumentOpened="ntko_control_onDocumentOpened"'
-                + ' ForOnSaveToURL="ntko_control_onSaveToUrl"'
                 + ' ForOnCustomToolBarCommand="ntko_control_customToolBarCmd"'
+                + ' ForOnSaveToURL="ntko_control_onSaveToUrl"'
+                + ' ForOnAddTemplateFromURL="ntko_control_AddTemplateFromURL"'
                 + ' _IsUseUTF8URL="-1"'
                 + ' _IsUseUTF8Data="-1"'
                 + ' _BorderStyle="1"'
@@ -153,13 +175,14 @@ function NtkoControl() {
                 + ' _ProductKey="' + productKey + '"'
                 + ' _ProductCaption="' + productCaption + '">'
                 + ' </object>');
-        } else if (this.browser === "firefox") {
+        } else if (this.browser.name === "firefox") {
             document.write('<object id="TANGER_OCX"'
                 + ' clsid="{' + clsid + '}"' + ' type="application/ntko-plug" codebase="' + codebase + '"'
                 + ' width="100%" height="100%"'
                 + ' ForOnDocumentOpened="ntko_control_onDocumentOpened"'
-                + ' ForOnSaveToURL="ntko_control_onSaveToUrl"'
                 + ' ForOnCustomToolBarCommand="ntko_control_customToolBarCmd"'
+                + ' ForOnSaveToURL="ntko_control_onSaveToUrl"'
+                + ' ForOnAddTemplateFromURL="ntko_control_AddTemplateFromURL"'
                 + ' _IsUseUTF8URL="-1"'
                 + ' _IsUseUTF8Data="-1"'
                 + ' _BorderStyle="1"'
@@ -175,13 +198,14 @@ function NtkoControl() {
         }
     };
 
-    this.browser = uaMatch().browser;
+    this.browser = this.detectBrowser();
+    this.isIE = this.browser.name === "ie";
     this.protectKey = "123456l91";
 
     window.ntko_control_onDocumentOpened = this._onDocumentOpened; // 打开文档回调
-    window.ntko_control_onDocumentClosed = this._onDocumentClosed; // 关闭文档回调
-    window.ntko_control_onSaveToUrl = this._onSaveToUrl; // saveToUrl回调
     window.ntko_control_customToolBarCmd = this._customToolBarCmd; // 工具条按钮onclick回调
+    window.ntko_control_onSaveToUrl = this._onSaveToUrl; // saveToUrl回调
+    window.ntko_control_AddTemplateFromURL = this._AddTemplateFromURL; // 工具条按钮onclick回调
 }
 
 NtkoControl.prototype = {
@@ -275,53 +299,29 @@ NtkoControl.prototype = {
 
             // ie 是同步获取的，result 就是结果，
             // chrome / firefox 是异步的，得到结果后会自动调用 _onSaveToUrl
-            if (this.browser === "ie") {
-                this._onSaveToUrl(result);
+            if (this.isIE) {
+                this._onSaveToUrl(null, null, result);
             }
         } catch (e) {
-            result = {state: -1, msg: "保存文件出错了！"};
-            this._onSaveToUrl(result);
+            result = {code: -1, msg: "保存文件出错了！"};
+            this._onSaveToUrl(null, null, result);
         }
     },
 
     makeRed: function (templateUrl, data) {
-        if (templateUrl === undefined) { // 从页面取具体数据
-            var tmpObj = document.getElementById("templateUrl");
-            templateUrl = (tmpObj) ? tmpObj.value : "";
-            if (!templateUrl) alert("没有指定套红模板!");
-
-            templateUrl = this.ctx + "/" + templateUrl;
-            data = this.formData;
-        }
-
         if (this.docType() === 1 || this.docType() === 6) {
             this.acceptRevisions(true);
 
             var curSel = this.tangerOcx.ActiveDocument.Application.Selection;
             curSel.WholeStory();
-            curSel.Copy();
-            this.tangerOcx.openfromurl(this.ctx + "/" + templateUrl);
+            curSel.Cut();
 
-            var BookMarkName = "正文";
-            if (!this.tangerOcx.ActiveDocument.BookMarks.Exists(BookMarkName)) {
-                alert('Word 模板中不存在名称为："' + BookMarkName + '"的书签！');
-                return;
+            this.formData = data;
+
+            this.tangerOcx.AddTemplateFromURL(this.ctx + "/" + templateUrl);
+            if (this.isIE) {
+                this._AddTemplateFromURL();
             }
-
-            this.tangerOcx.ActiveDocument.Application.Selection.GoTo(-1, 0, 0, BookMarkName);
-            this.tangerOcx.ActiveDocument.Application.Selection.PasteAndFormat("16");
-
-            var selection = this.tangerOcx.ActiveDocument.Application.Selection;
-            selection.EndKey(6, 0);
-            selection.TypeParagraph();
-
-            if (data) {
-                for (var k in data) {
-                    if (this.tangerOcx.ActiveDocument.BookMarks.Exists(k)) this.tangerOcx.SetBookmarkValue(k, data[k]);
-                }
-            }
-
-            this.acceptRevisions(true);
         } else {
             alert("不支持的文档内型");
         }
